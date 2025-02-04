@@ -1,3 +1,4 @@
+using System.Collections;
 using System.Collections.Generic;
 using UnityEngine;
 
@@ -45,13 +46,24 @@ public class Painter : MonoBehaviour
         {
             UndoStack.Add(clientId, new Stack<Color[]>());
         }
+        if (UndoStack[clientId].Count == 5)
+        {
+            TrimStack(clientId);
+        }
         SaveTextureState(UndoStack[clientId], paintTexture);
     }
 
     public void SaveTextureState(Stack<Color[]> stack, Texture2D paintTexture)
     {
         stack.Push(paintTexture.GetPixels());
-        //if (stack.Count > 10) stack.Pop(); // Limit stack size
+    }
+
+    private void TrimStack(string clientId)
+    {
+        var tempList = new List<Color[]>(UndoStack[clientId]); // Convert to a list
+        tempList.RemoveAt(tempList.Count - 1); // Remove the oldest element
+        tempList.Reverse();
+        UndoStack[clientId] = new Stack<Color[]>(tempList); // Recreate the stack
     }
 
     public void SetBrushColor(Color newColor)
