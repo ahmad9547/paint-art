@@ -1,129 +1,68 @@
 using UnityEngine;
 using System.Collections.Generic;
-using CodeMonkey.Utils;
 
 public class PaintableTexture : MonoBehaviour
 {
+    #region Serialized Fields
     [SerializeField] private int _textureSize = 1024;
+    [SerializeField] private Shader _shader;
+    #endregion
+
+    #region Private Fields
     private Texture2D _paintTexture;
+    public Texture2D PaintTexture => _paintTexture;
     private Renderer _objectRenderer;
+    #endregion
 
-    private Vector2? _lastPaintedUV = null; // Store last painted position
-
-    private int _brushSize => Painter.Instance.BrushSize;
-    private Color _brushColor => Painter.Instance.BrushColor;
-    private Painter _painter => Painter.Instance;
-
+    #region Unity Methods
     private void Start()
     {
         _objectRenderer = GetComponent<Renderer>();
         InitializeTexture();
     }
+    #endregion
 
-    private void Update()
-    {
-        if (Input.GetKeyDown(KeyCode.Z) && _painter.UndoStack.Count > 0) _painter.Undo(_paintTexture, InputManager.Instance.ClientID);
-        if (Input.GetKeyDown(KeyCode.Y) && _painter.RedoStack.Count > 0) _painter.Redo(_paintTexture, InputManager.Instance.ClientID);
-        
-        if (UtilsClass.IsPointerOverUI()) return;
-        if (Input.GetMouseButtonDown(0)) // On first press, save the state
-        {
-            _painter.SaveTextureState(_paintTexture, InputManager.Instance.ClientID);
-            _lastPaintedUV = null; // Reset last position
-            _painter.RedoStack.Clear();
-        }
-
-        if (Input.GetMouseButton(0))
-        {
-            Ray ray = Camera.main.ScreenPointToRay(Input.mousePosition);
-            if (Physics.Raycast(ray, out RaycastHit hit))
-            {
-                if (hit.collider.gameObject.Equals(gameObject))
-                {
-                    StartPaint(hit.textureCoord);
-                }
-            }
-        }
-
-        if (Input.GetMouseButtonUp(0))
-        {
-            _lastPaintedUV = null; // Reset when mouse is released
-        }
-    }
-
+    #region Initialization
     private void InitializeTexture()
     {
-        // Wall ka original texture get karo
         Texture baseTexture = _objectRenderer.material.mainTexture;
-
-        // Paint ke liye ek new texture banao
         _paintTexture = new Texture2D(_textureSize, _textureSize);
         _paintTexture.filterMode = FilterMode.Bilinear;
         _paintTexture.wrapMode = TextureWrapMode.Clamp;
 
-        // Clone material taake original material effect na ho
-        Material newMaterial = new Material(Shader.Find("Custom/PaintShader"));
-        newMaterial.SetTexture("_BaseTex", baseTexture); // Wall ka texture assign karo
-        newMaterial.SetTexture("_PaintTex", _paintTexture); // Paint ke liye texture assign karo
+        Material newMaterial = new Material(_shader);
+        newMaterial.SetTexture("_BaseTex", baseTexture);
+        newMaterial.SetTexture("_PaintTex", _paintTexture);
 
         _objectRenderer.material = newMaterial;
         ClearTexture();
     }
+    #endregion
 
-
-    void StartPaint(Vector2 coordinates)
-    {
-        Vector2 currentUV = coordinates;
-
-        if (_lastPaintedUV.HasValue)
-        {
-            DrawLine(_lastPaintedUV.Value, currentUV);
-        }
-        else
-        {
-            Paint(currentUV);
-        }
-
-        _lastPaintedUV = currentUV; // Update last position
-    }
-
-    private void Paint(Vector2 uv)
+    #region Painting Logic
+    public void PaintAt(Vector2 uv)
     {
         int centerX = (int)(uv.x * _textureSize);
         int centerY = (int)(uv.y * _textureSize);
 
-        for (int i = -_brushSize; i <= _brushSize; i++)
+        for (int i = -Painter.Instance.BrushSize; i <= Painter.Instance.BrushSize; i++)
         {
-            for (int j = -_brushSize; j <= _brushSize; j++)
+            for (int j = -Painter.Instance.BrushSize; j <= Painter.Instance.BrushSize; j++)
             {
-                // Calculate the distance from the center
                 float distance = Mathf.Sqrt(i * i + j * j);
-
-                // Check if the pixel lies within the circle radius
-                if (distance <= _brushSize)
+                if (distance <= Painter.Instance.BrushSize)
                 {
-                    // Apply randomness for spray effect
-                    if (Random.value > 0.5f) continue; // Randomly skip some pixels
-
+                    if (Random.value > 0.5f) continue;
                     int px = Mathf.Clamp(centerX + i, 0, _textureSize - 1);
                     int py = Mathf.Clamp(centerY + j, 0, _textureSize - 1);
-                    _paintTexture.SetPixel(px, py, _brushColor);
+                    _paintTexture.SetPixel(px, py, Painter.Instance.BrushColor);
                 }
             }
         }
         _paintTexture.Apply();
     }
 
-    private void ApplyPixels(List<Vector2Int> positions, List<Color> colors)
-    {
-        for (int i = 0; i < positions.Count; i++)
-        {
-            _paintTexture.SetPixel(positions[i].x, positions[i].y, colors[i]);
-        }
-        _paintTexture.Apply();
-    }
-
-    private void DrawLine(Vector2 startUV, Vector2 endUV)
+    public void DrawLine(Vector2 startUV, Vector2 endUV)
     {
         int startX = (int)(startUV.x * _textureSize);
         int startY = (int)(startUV.y * _textureSize);
@@ -140,16 +79,12 @@ public class PaintableTexture : MonoBehaviour
 
         while (true)
         {
-            // Add brush-sized pixels at each point (checking for circular region)
-            for (int i = -_brushSize; i <= _brushSize; i++)
+            for (int i = -Painter.Instance.BrushSize; i <= Painter.Instance.BrushSize; i++)
             {
-                for (int j = -_brushSize; j <= _brushSize; j++)
+                for (int j = -Painter.Instance.BrushSize; j <= Painter.Instance.BrushSize; j++)
                 {
-                    // Calculate the distance from the center of the brush
                     float distance = Mathf.Sqrt(i * i + j * j);
-
-                    // Only add pixels that are within the circular radius
-                    if (distance <= _brushSize)
+                    if (distance <= Painter.Instance.BrushSize)
                     {
                         int px = Mathf.Clamp(startX + i, 0, _textureSize - 1);
                         int py = Mathf.Clamp(startY + j, 0, _textureSize - 1);
@@ -168,24 +103,26 @@ public class PaintableTexture : MonoBehaviour
         ApplyBrushToTexture(pixelPositions);
     }
 
-
     private void ApplyBrushToTexture(List<Vector2Int> pixelPositions)
     {
         foreach (var position in pixelPositions)
         {
-            _paintTexture.SetPixel(position.x, position.y, _brushColor);
+            _paintTexture.SetPixel(position.x, position.y, Painter.Instance.BrushColor);
         }
         _paintTexture.Apply();
     }
 
+    #endregion
+
+    #region Utility Methods
     private void ClearTexture()
     {
         Color[] clearPixels = new Color[_textureSize * _textureSize];
         for (int i = 0; i < clearPixels.Length; i++)
-            clearPixels[i] = new Color(0, 0, 0, 0); // Fully transparent pixels
+            clearPixels[i] = new Color(0, 0, 0, 0);
 
         _paintTexture.SetPixels(clearPixels);
         _paintTexture.Apply();
     }
-
+    #endregion
 }

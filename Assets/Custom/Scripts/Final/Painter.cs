@@ -1,4 +1,4 @@
-using System.Collections;
+using CodeMonkey.Utils;
 using System.Collections.Generic;
 using UnityEngine;
 
@@ -6,65 +6,196 @@ public class Painter : MonoBehaviour
 {
     public static Painter Instance { get; private set; }
 
-    public Color BrushColor /*{ get; private set; }*/ = Color.red;
-    public int BrushSize /*{ get; private set; }*/ = 5;
+    #region Brush Properties
+    public Color BrushColor = Color.red;
+    public int BrushSize = 5;
+    #endregion
 
-    private Dictionary<string,Stack<Color[]>> undoStack = new();
-    public Dictionary<string, Stack<Color[]>> UndoStack => undoStack;
+    #region Undo/Redo System
+    private Dictionary<int, Stack<Color[]>> undoStack = new();
+    public Dictionary<int, Stack<Color[]>> UndoStack => undoStack;
 
-    private Dictionary<string, Stack<Color[]>> redoStack = new();
-    public Dictionary<string, Stack<Color[]>> RedoStack => redoStack;
+    private Dictionary<int, Stack<Color[]>> redoStack = new();
+    public Dictionary<int, Stack<Color[]>> RedoStack => redoStack;
+    private Stack<GameObject> _paintedUndoObjects = new();
+    private Stack<GameObject> _paintedRedoObjects = new();
+    #endregion
 
+    #region Private Fields
+    private int _clientId => 1;
+    public GameObject LastPaintedObject { get; set; }
+    private bool _isDrawing = false;
+    private bool _ctrl = true;
+    #endregion
+
+    #region Unity Methods
     private void Awake()
     {
         Instance = this;
     }
 
-    public void Undo(Texture2D paintTexture, string clientId)
+    private void Update()
     {
-        if (UndoStack[clientId].Count <= 0) return;
-        if (!RedoStack.ContainsKey(clientId))
+        HandleInput();
+    }
+    #endregion
+
+    #region Input Handling
+    private void HandleInput()
+    {
+        if (UtilsClass.IsPointerOverUI()) return;
+
+        if (!_isDrawing)
         {
-            RedoStack.Add(clientId, new Stack<Color[]>());
+#if UNITY_WEBGL && !UNITY_EDITOR
+            _ctrl = Input.GetKey(KeyCode.LeftControl);
+#endif
+            if (Input.GetKeyDown(KeyCode.Z) && _ctrl && UndoStack.Count > 0)
+            {
+                Undo(_clientId);
+            }
+            if (Input.GetKeyDown(KeyCode.Y) && _ctrl && RedoStack.Count > 0)
+            {
+                Redo(_clientId);
+            }
         }
-        SaveTextureState(RedoStack[clientId], paintTexture);
-        paintTexture.SetPixels(UndoStack[clientId].Pop());
-        paintTexture.Apply();
-    }
 
-    public void Redo(Texture2D paintTexture, string clientId)
-    {
-        if (RedoStack[clientId].Count <= 0) return;
-        SaveTextureState(UndoStack[clientId], paintTexture);
-        paintTexture.SetPixels(RedoStack[clientId].Pop());
-        paintTexture.Apply();
-    }
-
-    public void SaveTextureState(Texture2D paintTexture, string clientId)
-    {
-        if (!UndoStack.ContainsKey(clientId))
+        if (Input.GetMouseButtonDown(0))
         {
-            UndoStack.Add(clientId, new Stack<Color[]>());
+            _isDrawing = true;
+            TryStartPainting();
+            RedoStack.Clear(); // Clear redo stack on new paint
+            _paintedRedoObjects.Clear();
         }
-        if (UndoStack[clientId].Count == 5)
+
+        if (Input.GetMouseButton(0))
         {
-            TrimStack(clientId);
+            TryContinuePainting();
         }
-        SaveTextureState(UndoStack[clientId], paintTexture);
+
+        if (Input.GetMouseButtonUp(0))
+        {
+            _isDrawing = false;
+            _paintedUndoObjects.Push(LastPaintedObject);
+            LastPaintedObject = null;
+        }
+    }
+    #endregion
+
+    #region Painting Methods
+    private Vector2? _lastPaintedUV = null; // Add this to Painter class
+
+    private void TryContinuePainting()
+    {
+        if (RaycastFromMouse(out RaycastHit hit) && hit.collider.gameObject == LastPaintedObject)
+        {
+            PaintableTexture paintable = hit.collider.GetComponent<PaintableTexture>();
+            if (paintable != null)
+            {
+                Vector2 currentUV = hit.textureCoord;
+
+                if (_lastPaintedUV.HasValue)
+                {
+                    paintable.DrawLine(_lastPaintedUV.Value, currentUV);
+                }
+                else
+                {
+                    paintable.PaintAt(currentUV);
+                }
+
+                _lastPaintedUV = currentUV;
+            }
+        }
     }
 
-    public void SaveTextureState(Stack<Color[]> stack, Texture2D paintTexture)
+    private void TryStartPainting()
     {
-        stack.Push(paintTexture.GetPixels());
+        if (RaycastFromMouse(out RaycastHit hit))
+        {
+            PaintableTexture paintable = hit.collider.GetComponent<PaintableTexture>();
+            if (paintable != null)
+            {
+                SaveTextureState(paintable.PaintTexture, paintable.gameObject.name);
+                paintable.PaintAt(hit.textureCoord);
+                LastPaintedObject = paintable.gameObject;
+                _lastPaintedUV = hit.textureCoord; // Start tracking UV
+            }
+        }
     }
 
-    private void TrimStack(string clientId)
+    private bool RaycastFromMouse(out RaycastHit hit)
     {
-        var tempList = new List<Color[]>(UndoStack[clientId]); // Convert to a list
-        tempList.RemoveAt(tempList.Count - 1); // Remove the oldest element
+        Ray ray = Camera.main.ScreenPointToRay(Input.mousePosition);
+        return Physics.Raycast(ray, out hit);
+    }
+    #endregion
+
+    #region Undo/Redo Methods
+    public void Undo(int clientId)
+    {
+        if (_paintedUndoObjects.Count > 0)
+        {
+            LastPaintedObject = _paintedUndoObjects.Pop();
+            _paintedRedoObjects.Push(LastPaintedObject);
+            PaintableTexture paintable = LastPaintedObject.GetComponent<PaintableTexture>();
+            if (paintable != null && UndoStack.ContainsKey(clientId) && UndoStack[clientId].Count > 0)
+            {
+                SaveTextureState(paintable.PaintTexture, LastPaintedObject.name, isUndo: false); // Save for redo
+                paintable.PaintTexture.SetPixels(UndoStack[clientId].Pop());
+                paintable.PaintTexture.Apply();
+            }
+        }
+    }
+
+    public void Redo(int clientId)
+    {
+        if (_paintedRedoObjects.Count > 0)
+        {
+            LastPaintedObject = _paintedRedoObjects.Pop();
+            _paintedUndoObjects.Push(LastPaintedObject);
+            PaintableTexture paintable = LastPaintedObject.GetComponent<PaintableTexture>();
+            if (paintable != null && RedoStack.ContainsKey(clientId) && RedoStack[clientId].Count > 0)
+            {
+                SaveTextureState(paintable.PaintTexture, LastPaintedObject.name, isUndo: true); // Save for undo
+                paintable.PaintTexture.SetPixels(RedoStack[clientId].Pop());
+                paintable.PaintTexture.Apply();
+            }
+        }
+    }
+
+    public void SaveTextureState(Texture2D paintTexture, string name, bool isUndo = true)
+    {
+        if (!UndoStack.ContainsKey(_clientId))
+        {
+            UndoStack.Add(_clientId, new Stack<Color[]>());
+        }
+        if (!RedoStack.ContainsKey(_clientId))
+        {
+            RedoStack.Add(_clientId, new Stack<Color[]>());
+        }
+
+        if (isUndo)
+        {
+            if (UndoStack[_clientId].Count == 5)
+            {
+                TrimStack(_clientId);
+            }
+            UndoStack[_clientId].Push(paintTexture.GetPixels());
+        }
+        else
+        {
+            RedoStack[_clientId].Push(paintTexture.GetPixels());
+        }
+    }
+
+    private void TrimStack(int clientId)
+    {
+        var tempList = new List<Color[]>(UndoStack[clientId]);
+        tempList.RemoveAt(tempList.Count - 1);
         tempList.Reverse();
-        UndoStack[clientId] = new Stack<Color[]>(tempList); // Recreate the stack
+        UndoStack[clientId] = new Stack<Color[]>(tempList);
     }
+    #endregion
 
     public void SetBrushColor(Color newColor)
     {
@@ -75,5 +206,4 @@ public class Painter : MonoBehaviour
     {
         BrushSize = newThickness;
     }
-
 }

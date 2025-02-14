@@ -997,6 +997,7 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: 
   _textureSize: 1024
+  _shader: {fileID: 0}
 --- !u!1 &857190490
 GameObject:
   m_ObjectHideFlags: 0
@@ -2273,6 +2274,7 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: 
   _textureSize: 1024
+  _shader: {fileID: 0}
 --- !u!23 &2008292824
 MeshRenderer:
   m_ObjectHideFlags: 0
@@ -2678,6 +2680,7 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: 
   _textureSize: 1024
+  _shader: {fileID: 0}
 --- !u!64 &2111433343
 MeshCollider:
   m_ObjectHideFlags: 0
@@ -3471,6 +3474,7 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: 
   _textureSize: 1024
+  _shader: {fileID: 4800000, guid: 8cc6d09a5c289af43b3d7b036377426c, type: 3}
 --- !u!1 &4655970557153041176
 GameObject:
   m_ObjectHideFlags: 0
